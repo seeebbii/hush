@@ -6,24 +6,31 @@ import { Rnnoise, type DenoiseState } from "@shiguredo/rnnoise-wasm";
 const FRAME_SIZE = 480;
 const SCALE_UP = 32768;
 const SCALE_DOWN = 1 / 32768;
-const METRICS_INTERVAL = 8; // Send metrics every 8 frames (~80ms = 12fps)
+const RING_SIZE = 4096; // Power of 2, fits multiple frames
+const RING_MASK = RING_SIZE - 1;
+const METRICS_INTERVAL = 8; // Send metrics every ~80ms
 
 class NoiseProcessor extends AudioWorkletProcessor {
   private rnnoise: Rnnoise | null = null;
   private denoiseState: DenoiseState | null = null;
 
-  // Pre-allocated buffers (never allocate in process())
-  private inputBuffer: Float32Array = new Float32Array(FRAME_SIZE + 128);
-  private rnnoiseFrame: Float32Array = new Float32Array(FRAME_SIZE);
-  private outputBuffer: Float32Array = new Float32Array(FRAME_SIZE);
-  private bufferWritePos: number = 0;
-  private outputReadPos: number = 0;
-  private outputAvailable: number = 0;
+  // Ring buffers — no allocations during processing
+  private inRing = new Float32Array(RING_SIZE);
+  private outRing = new Float32Array(RING_SIZE);
+  private inWrite = 0;
+  private inRead = 0;
+  private outWrite = 0;
+  private outRead = 0;
+
+  // Scratch buffers for RNNoise (pre-allocated)
+  private rnnoiseFrame = new Float32Array(FRAME_SIZE);
+  private rawFrame = new Float32Array(FRAME_SIZE);
 
   // Parameters
-  private enabled: boolean = true;
-  private strength: number = 75;
-  private frameCount: number = 0;
+  private enabled = true;
+  private strength = 75;
+  private frameCount = 0;
+  private primed = false; // true once first frame has been processed
 
   constructor() {
     super();
@@ -53,59 +60,51 @@ class NoiseProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
 
-    // Pass through raw audio if disabled or WASM not ready
+    // Pass through if disabled or WASM not ready
     if (!this.enabled || !this.denoiseState) {
       output.set(input);
       return true;
     }
 
-    // Read from processed output buffer if available
-    if (this.outputAvailable > 0) {
-      const toRead = Math.min(input.length, this.outputAvailable);
-      output.set(this.outputBuffer.subarray(this.outputReadPos, this.outputReadPos + toRead));
-      this.outputReadPos += toRead;
-      this.outputAvailable -= toRead;
-      if (toRead < input.length) {
-        // Fill remainder with raw input (not silence) to avoid gaps
-        for (let i = toRead; i < input.length; i++) {
-          output[i] = input[i];
-        }
-      }
-    } else {
-      // No processed output yet — pass through raw audio (not silence)
-      output.set(input);
+    // Write input samples to input ring buffer
+    for (let i = 0; i < input.length; i++) {
+      this.inRing[(this.inWrite + i) & RING_MASK] = input[i];
     }
+    this.inWrite += input.length;
 
-    // Accumulate input
-    this.inputBuffer.set(input, this.bufferWritePos);
-    this.bufferWritePos += input.length;
-
-    // Process when we have a full frame
-    if (this.bufferWritePos >= FRAME_SIZE) {
-      // Scale to int16 range for RNNoise
+    // Process all complete frames available in input ring
+    while (this.inWrite - this.inRead >= FRAME_SIZE) {
+      // Copy frame from input ring and save raw copy for wet/dry mix
       for (let i = 0; i < FRAME_SIZE; i++) {
-        this.rnnoiseFrame[i] = this.inputBuffer[i] * SCALE_UP;
+        const sample = this.inRing[(this.inRead + i) & RING_MASK];
+        this.rawFrame[i] = sample;
+        this.rnnoiseFrame[i] = sample * SCALE_UP;
       }
+      this.inRead += FRAME_SIZE;
 
+      // RNNoise processes in-place
       const vadProb = this.denoiseState.processFrame(this.rnnoiseFrame);
 
-      // Apply wet/dry mix
+      // Write processed output to output ring with wet/dry mix
       const wet = this.strength / 100;
       const dry = 1 - wet;
       for (let i = 0; i < FRAME_SIZE; i++) {
-        this.outputBuffer[i] =
+        this.outRing[(this.outWrite + i) & RING_MASK] =
           this.rnnoiseFrame[i] * SCALE_DOWN * wet +
-          this.inputBuffer[i] * dry;
+          this.rawFrame[i] * dry;
       }
+      this.outWrite += FRAME_SIZE;
+      this.primed = true;
 
-      // Send metrics at throttled rate (~12fps instead of 100fps)
+      // Send metrics at throttled rate
       this.frameCount++;
       if (this.frameCount % METRICS_INTERVAL === 0) {
         let inputRms = 0;
         let outputRms = 0;
         for (let i = 0; i < FRAME_SIZE; i++) {
-          inputRms += this.inputBuffer[i] * this.inputBuffer[i];
-          outputRms += this.outputBuffer[i] * this.outputBuffer[i];
+          inputRms += this.rawFrame[i] * this.rawFrame[i];
+          const out = this.outRing[(this.outWrite - FRAME_SIZE + i) & RING_MASK];
+          outputRms += out * out;
         }
         inputRms = Math.sqrt(inputRms / FRAME_SIZE);
         outputRms = Math.sqrt(outputRms / FRAME_SIZE);
@@ -121,15 +120,21 @@ class NoiseProcessor extends AudioWorkletProcessor {
           vadProbability: vadProb,
         });
       }
+    }
 
-      // Move leftover
-      const leftover = this.bufferWritePos - FRAME_SIZE;
-      if (leftover > 0) {
-        this.inputBuffer.copyWithin(0, FRAME_SIZE, this.bufferWritePos);
+    // Read from output ring buffer
+    const outAvailable = this.outWrite - this.outRead;
+    if (outAvailable >= input.length) {
+      for (let i = 0; i < input.length; i++) {
+        output[i] = this.outRing[(this.outRead + i) & RING_MASK];
       }
-      this.bufferWritePos = leftover;
-      this.outputReadPos = 0;
-      this.outputAvailable = FRAME_SIZE;
+      this.outRead += input.length;
+    } else if (!this.primed) {
+      // Not primed yet — pass through raw audio until first frame processed
+      output.set(input);
+    } else {
+      // Underrun (shouldn't happen in normal operation) — pass through
+      output.set(input);
     }
 
     return true;
