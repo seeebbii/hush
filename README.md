@@ -1,8 +1,8 @@
-# HUSH — Real-Time Noise Cancellation
+# Must Hush — Real-Time Noise Suppression
 
-AI-powered noise cancellation that runs entirely in your browser. No uploads. No servers. No compromise.
+AI-powered noise suppression that runs entirely in your browser. No uploads. No servers. No compromise.
 
-HUSH is a browser extension that intercepts your microphone audio and removes background noise in real-time using [RNNoise](https://jmvalin.ca/demo/rnnoise/) — a recurrent neural network trained for noise suppression. Works on any website: Google Meet, Work Adventure, Discord, Zoom Web, and more.
+Must Hush is a browser extension that intercepts your microphone audio and removes background noise in real-time using [RNNoise](https://jmvalin.ca/demo/rnnoise/) — a recurrent neural network trained for noise suppression. Works on any website: Google Meet, Work Adventure, Discord, Zoom Web, and more.
 
 ## Features
 
@@ -43,7 +43,7 @@ Then load `packages/extension/dist/chrome/` as an unpacked extension.
 
 ## Usage
 
-1. Click the **HUSH** icon in your browser toolbar
+1. Click the **Must Hush** icon in your browser toolbar
 2. Adjust **Strength** (0-100%):
    - 0-30%: Light denoising (RNNoise only)
    - 30-70%: Moderate (RNNoise + light VAD gate)

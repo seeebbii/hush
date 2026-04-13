@@ -72,7 +72,7 @@ export function Options() {
         </div>
         <div>
           <h1 className="font-[family-name:var(--font-display)] font-bold text-xl tracking-[2px] text-text-primary leading-none">
-            HUSH Settings
+            Must Hush Settings
           </h1>
           <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-tertiary">
             v0.1.0
@@ -181,7 +181,7 @@ export function Options() {
         <div className="bg-bg-secondary rounded-lg px-3 py-3 border border-border-subtle">
           <div className="flex items-center justify-between mb-2">
             <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary">
-              Toggle noise cancellation
+              Toggle noise suppression
             </span>
           </div>
           <div className="flex flex-col gap-1.5 mb-2">

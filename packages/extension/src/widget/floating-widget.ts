@@ -28,7 +28,7 @@ export function createWidget(position: { x: number; y: number }): void {
   // Power button
   powerBtn = document.createElement("button");
   powerBtn.className = "power-btn";
-  powerBtn.setAttribute("aria-label", "Toggle HUSH noise cancellation");
+  powerBtn.setAttribute("aria-label", "Toggle Must Hush noise suppression");
 
   const dot = document.createElement("div");
   dot.className = "power-dot";
@@ -40,7 +40,7 @@ export function createWidget(position: { x: number; y: number }): void {
 
   const title = document.createElement("div");
   title.className = "title";
-  title.textContent = "HUSH";
+  title.textContent = "Must Hush";
 
   statsEl = document.createElement("div");
   statsEl.className = "stats";
@@ -53,7 +53,7 @@ export function createWidget(position: { x: number; y: number }): void {
   // Close button
   const closeBtn = document.createElement("button");
   closeBtn.className = "close-btn";
-  closeBtn.setAttribute("aria-label", "Close HUSH widget");
+  closeBtn.setAttribute("aria-label", "Close Must Hush widget");
   closeBtn.textContent = "✕";
 
   // Assemble widget

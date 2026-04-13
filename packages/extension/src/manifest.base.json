@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "HUSH — Noise Cancellation",
+  "name": "Must Hush — Noise Suppression",
   "version": "0.1.0",
-  "description": "AI-powered noise cancellation for any website. Privacy-first — all processing happens locally.",
+  "description": "AI-powered noise suppression for any website. Privacy-first — all processing happens locally.",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -10,7 +10,7 @@
   },
   "action": {
     "default_popup": "src/popup/popup.html",
-    "default_title": "HUSH"
+    "default_title": "Must Hush"
   },
   "options_ui": {
     "page": "src/options/options.html",
@@ -49,7 +49,7 @@
         "mac": "MacCtrl+Shift+H",
         "linux": "Alt+Shift+H"
       },
-      "description": "Toggle HUSH noise cancellation"
+      "description": "Toggle Must Hush noise suppression"
     }
   }
 }

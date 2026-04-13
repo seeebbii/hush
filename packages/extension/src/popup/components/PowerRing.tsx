@@ -38,7 +38,7 @@ export function PowerRing({ enabled, isProcessing, latencyMs, onToggle }: PowerR
       </button>
       <div className="flex-1">
         <div className="font-[family-name:var(--font-display)] font-semibold text-sm text-text-primary">
-          Noise Cancellation
+          Noise Suppression
         </div>
         <div className="font-[family-name:var(--font-mono)] text-[11px] flex items-center gap-1.5">
           <div
