@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hush/audio-engine": "workspace:*",
+    "@shiguredo/rnnoise-wasm": "^2025.1.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "webextension-polyfill": "^0.12.0"
