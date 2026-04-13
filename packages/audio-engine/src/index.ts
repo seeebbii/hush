@@ -8,3 +8,4 @@ export {
   SAMPLE_RATE,
 } from "./types";
 export { NoiseGate, type NoiseGateParams } from "./noise-gate";
+export const WORKLET_PROCESSOR_NAME = "noise-processor";
