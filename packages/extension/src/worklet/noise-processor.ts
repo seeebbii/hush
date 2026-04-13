@@ -1,3 +1,6 @@
+// Polyfills for URL, document, WorkerGlobalScope are injected at bundle time
+// by the workletPolyfillPlugin in vite.config.ts — they must run before
+// the Emscripten-compiled RNNoise WASM loader evaluates.
 import { Rnnoise, type DenoiseState } from "@shiguredo/rnnoise-wasm";
 
 const FRAME_SIZE = 480;
