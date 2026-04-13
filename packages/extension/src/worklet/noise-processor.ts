@@ -6,15 +6,15 @@ import { Rnnoise, type DenoiseState } from "@shiguredo/rnnoise-wasm";
 const FRAME_SIZE = 480;
 const SCALE_UP = 32768;
 const SCALE_DOWN = 1 / 32768;
-const RING_SIZE = 4096; // Power of 2, fits multiple frames
+const RING_SIZE = 4096;
 const RING_MASK = RING_SIZE - 1;
-const METRICS_INTERVAL = 8; // Send metrics every ~80ms
+const METRICS_INTERVAL = 8;
 
 class NoiseProcessor extends AudioWorkletProcessor {
   private rnnoise: Rnnoise | null = null;
   private denoiseState: DenoiseState | null = null;
 
-  // Ring buffers — no allocations during processing
+  // Ring buffers
   private inRing = new Float32Array(RING_SIZE);
   private outRing = new Float32Array(RING_SIZE);
   private inWrite = 0;
@@ -22,7 +22,7 @@ class NoiseProcessor extends AudioWorkletProcessor {
   private outWrite = 0;
   private outRead = 0;
 
-  // Scratch buffers for RNNoise (pre-allocated)
+  // Scratch buffers
   private rnnoiseFrame = new Float32Array(FRAME_SIZE);
   private rawFrame = new Float32Array(FRAME_SIZE);
 
@@ -30,7 +30,11 @@ class NoiseProcessor extends AudioWorkletProcessor {
   private enabled = true;
   private strength = 75;
   private frameCount = 0;
-  private primed = false; // true once first frame has been processed
+  private primed = false;
+
+  // VAD-driven noise gate state
+  private gateGain = 0; // current gate gain (0 = closed, 1 = open)
+  private vadSmoothed = 0; // smoothed VAD probability
 
   constructor() {
     super();
@@ -60,21 +64,19 @@ class NoiseProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
 
-    // Pass through if disabled or WASM not ready
     if (!this.enabled || !this.denoiseState) {
       output.set(input);
       return true;
     }
 
-    // Write input samples to input ring buffer
+    // Write input to input ring
     for (let i = 0; i < input.length; i++) {
       this.inRing[(this.inWrite + i) & RING_MASK] = input[i];
     }
     this.inWrite += input.length;
 
-    // Process all complete frames available in input ring
+    // Process all complete frames
     while (this.inWrite - this.inRead >= FRAME_SIZE) {
-      // Copy frame from input ring and save raw copy for wet/dry mix
       for (let i = 0; i < FRAME_SIZE; i++) {
         const sample = this.inRing[(this.inRead + i) & RING_MASK];
         this.rawFrame[i] = sample;
@@ -82,47 +84,87 @@ class NoiseProcessor extends AudioWorkletProcessor {
       }
       this.inRead += FRAME_SIZE;
 
-      // RNNoise processes in-place
+      // RNNoise: ML denoising + VAD
       const vadProb = this.denoiseState.processFrame(this.rnnoiseFrame);
 
-      // Write processed output to output ring with wet/dry mix
-      const wet = this.strength / 100;
-      const dry = 1 - wet;
+      // Smooth VAD to avoid flutter (exponential moving average)
+      this.vadSmoothed = this.vadSmoothed * 0.7 + vadProb * 0.3;
+
+      // Compute input energy (RMS in dBFS)
+      let inputRms = 0;
       for (let i = 0; i < FRAME_SIZE; i++) {
-        this.outRing[(this.outWrite + i) & RING_MASK] =
-          this.rnnoiseFrame[i] * SCALE_DOWN * wet +
-          this.rawFrame[i] * dry;
+        inputRms += this.rawFrame[i] * this.rawFrame[i];
+      }
+      inputRms = Math.sqrt(inputRms / FRAME_SIZE);
+      const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
+
+      // --- VAD-driven noise gate ---
+      // Strength 0-100 maps to gate aggressiveness:
+      //   0 = no gating (passthrough)
+      //   50 = moderate (gate when VAD < 0.3 and signal quiet)
+      //   100 = aggressive (gate when VAD < 0.6 or signal quiet)
+      const aggressiveness = this.strength / 100;
+
+      // VAD threshold: higher strength = higher threshold = more gating
+      const vadThreshold = 0.15 + aggressiveness * 0.45; // 0.15 to 0.6
+
+      // Energy threshold: gate signals quieter than this (far voices are quieter)
+      // Higher strength = higher threshold = only close/loud voice passes
+      const energyThresholdDb = -50 + aggressiveness * 20; // -50 to -30 dBFS
+
+      // Gate decision: open if speech detected AND signal is loud enough
+      const isSpeech = this.vadSmoothed > vadThreshold;
+      const isLoud = inputDb > energyThresholdDb;
+      const shouldOpen = isSpeech && isLoud;
+
+      // Smooth gate gain (attack fast, release slower to avoid chopping words)
+      const attackRate = 0.3; // open quickly
+      const releaseRate = 0.05 + (1 - aggressiveness) * 0.1; // close speed depends on strength
+      const targetGain = shouldOpen ? 1.0 : 0.0;
+
+      if (targetGain > this.gateGain) {
+        this.gateGain += attackRate * (targetGain - this.gateGain);
+      } else {
+        this.gateGain += releaseRate * (targetGain - this.gateGain);
+      }
+
+      // Clamp small values to zero to ensure silence when gate is closed
+      if (this.gateGain < 0.001) this.gateGain = 0;
+
+      // Write processed + gated output to output ring
+      // Full RNNoise (no dry mix) when strength > 50, blend below 50
+      const wet = Math.min(aggressiveness * 2, 1.0); // 0-50% strength = blend, 50-100% = full RNNoise
+      const dry = 1 - wet;
+
+      for (let i = 0; i < FRAME_SIZE; i++) {
+        const denoised = this.rnnoiseFrame[i] * SCALE_DOWN * wet + this.rawFrame[i] * dry;
+        this.outRing[(this.outWrite + i) & RING_MASK] = denoised * this.gateGain;
       }
       this.outWrite += FRAME_SIZE;
       this.primed = true;
 
-      // Send metrics at throttled rate
+      // Send metrics
       this.frameCount++;
       if (this.frameCount % METRICS_INTERVAL === 0) {
-        let inputRms = 0;
         let outputRms = 0;
         for (let i = 0; i < FRAME_SIZE; i++) {
-          inputRms += this.rawFrame[i] * this.rawFrame[i];
           const out = this.outRing[(this.outWrite - FRAME_SIZE + i) & RING_MASK];
           outputRms += out * out;
         }
-        inputRms = Math.sqrt(inputRms / FRAME_SIZE);
         outputRms = Math.sqrt(outputRms / FRAME_SIZE);
-
-        const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
         const outputDb = outputRms > 0 ? 20 * Math.log10(outputRms) : -96;
 
         this.port.postMessage({
           type: "metrics",
           inputLevel: inputDb,
           outputLevel: outputDb,
-          reduction: inputDb - outputDb,
-          vadProbability: vadProb,
+          reduction: Math.max(0, inputDb - outputDb),
+          vadProbability: this.vadSmoothed,
         });
       }
     }
 
-    // Read from output ring buffer
+    // Read from output ring
     const outAvailable = this.outWrite - this.outRead;
     if (outAvailable >= input.length) {
       for (let i = 0; i < input.length; i++) {
@@ -130,10 +172,8 @@ class NoiseProcessor extends AudioWorkletProcessor {
       }
       this.outRead += input.length;
     } else if (!this.primed) {
-      // Not primed yet — pass through raw audio until first frame processed
       output.set(input);
     } else {
-      // Underrun (shouldn't happen in normal operation) — pass through
       output.set(input);
     }
 
