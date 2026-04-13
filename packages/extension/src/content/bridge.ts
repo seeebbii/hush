@@ -9,12 +9,14 @@ document.documentElement.dataset.hushWorkletUrl = browser.runtime.getURL(
 
 // Load initial state and pass to main world
 browser.storage.local
-  .get(["enabled", "strength", "disabledSites"])
+  .get(["enabled", "strength", "disabledSites", "monitor", "preferredDeviceId"])
   .then((state) => {
     const merged = {
       enabled: state.enabled ?? true,
       strength: state.strength ?? 75,
       disabledSites: state.disabledSites ?? [],
+      monitor: state.monitor ?? false,
+      preferredDeviceId: state.preferredDeviceId ?? "",
     };
     document.documentElement.dataset.hushState = JSON.stringify(merged);
     // Also dispatch event in case main-world script already loaded
@@ -60,3 +62,8 @@ browser.storage.onChanged.addListener((changes, area) => {
     );
   }
 });
+
+// Listen for device save requests from main world → persist to storage
+document.documentElement.addEventListener("hush:save-device", ((e: CustomEvent) => {
+  browser.storage.local.set({ preferredDeviceId: e.detail.deviceId });
+}) as EventListener);

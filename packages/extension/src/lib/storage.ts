@@ -7,6 +7,7 @@ export interface HushState {
   disabledSites: string[];
   widgetPinned: boolean;
   widgetPosition: { x: number; y: number };
+  preferredDeviceId: string;
 }
 
 const DEFAULTS: HushState = {
@@ -16,6 +17,7 @@ const DEFAULTS: HushState = {
   disabledSites: [],
   widgetPinned: false,
   widgetPosition: { x: 20, y: 20 },
+  preferredDeviceId: "",
 };
 
 export async function getState(): Promise<HushState> {

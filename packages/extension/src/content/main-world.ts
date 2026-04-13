@@ -7,6 +7,7 @@ interface HushConfig {
   strength: number;
   monitor: boolean;
   disabledSites: string[];
+  preferredDeviceId: string;
 }
 
 let config: HushConfig = {
@@ -14,6 +15,7 @@ let config: HushConfig = {
   strength: 75,
   monitor: false,
   disabledSites: [],
+  preferredDeviceId: "",
 };
 
 try {
@@ -155,7 +157,33 @@ const realGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
 navigator.mediaDevices.getUserMedia = async function (
   constraints?: MediaStreamConstraints,
 ): Promise<MediaStream> {
+  if (constraints?.audio && config.preferredDeviceId) {
+    const audioConstraint = constraints.audio;
+    if (typeof audioConstraint === "boolean" || !audioConstraint.deviceId) {
+      constraints = {
+        ...constraints,
+        audio: {
+          ...(typeof audioConstraint === "boolean" ? {} : audioConstraint),
+          deviceId: { ideal: config.preferredDeviceId },
+        },
+      };
+    }
+  }
+
   const rawStream = await realGetUserMedia(constraints);
+
+  if (constraints?.audio) {
+    const audioTrack = rawStream.getAudioTracks()[0];
+    if (audioTrack) {
+      const actualDeviceId = audioTrack.getSettings().deviceId;
+      if (actualDeviceId && actualDeviceId !== config.preferredDeviceId) {
+        config.preferredDeviceId = actualDeviceId;
+        document.documentElement.dispatchEvent(
+          new CustomEvent("hush:save-device", { detail: { deviceId: actualDeviceId } }),
+        );
+      }
+    }
+  }
 
   // If no audio requested, return raw (video-only calls etc.)
   if (!constraints?.audio) {
