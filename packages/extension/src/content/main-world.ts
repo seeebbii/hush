@@ -225,11 +225,8 @@ navigator.mediaDevices.getUserMedia = async function (
   if (!constraints?.audio) {
     return rawStream;
   }
-
-  // If HUSH is disabled globally or for this site, return raw
-  if (!config.enabled || isDisabledForSite()) {
-    return rawStream;
-  }
+  // Always route through pipeline — worklet handles passthrough when disabled.
+  // This lets toggling ON work instantly without page reload.
 
   // Ensure pipeline
   if (!pipelineReady) {
