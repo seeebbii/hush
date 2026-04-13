@@ -1,6 +1,7 @@
 // Main world script — runs in the PAGE's JavaScript context
 // NO access to browser.* extension APIs
 // Communicates with bridge.ts via CustomEvents on document.documentElement
+import { createWidget, destroyWidget, updateWidgetMetrics } from "../widget/floating-widget";
 
 interface HushConfig {
   enabled: boolean;
@@ -8,6 +9,8 @@ interface HushConfig {
   monitor: boolean;
   disabledSites: string[];
   preferredDeviceId: string;
+  widgetPinned: boolean;
+  widgetPosition: { x: number; y: number };
 }
 
 let config: HushConfig = {
@@ -16,6 +19,8 @@ let config: HushConfig = {
   monitor: false,
   disabledSites: [],
   preferredDeviceId: "",
+  widgetPinned: false,
+  widgetPosition: { x: 20, y: 20 },
 };
 
 try {
@@ -31,6 +36,14 @@ document.documentElement.addEventListener("hush:state", ((e: CustomEvent) => {
   updateWorkletParams();
   if (typeof e.detail.monitor === "boolean" && e.detail.monitor !== prev.monitor) {
     setMonitor(e.detail.monitor);
+  }
+  if (typeof e.detail.widgetPinned === "boolean") {
+    if (e.detail.widgetPinned) {
+      const pos = e.detail.widgetPosition || { x: 20, y: 20 };
+      createWidget(pos);
+    } else {
+      destroyWidget();
+    }
   }
 }) as EventListener);
 
@@ -125,6 +138,7 @@ async function initPipeline(): Promise<boolean> {
         document.documentElement.dispatchEvent(
           new CustomEvent("hush:metrics", { detail: e.data }),
         );
+        updateWidgetMetrics(e.data.reduction, e.data.latencyMs, config.enabled);
       } else if (e.data.type === "ready") {
         console.log("[HUSH] RNNoise WASM loaded, processing active");
       } else if (e.data.type === "error") {
@@ -145,6 +159,28 @@ async function initPipeline(): Promise<boolean> {
     return false;
   }
 }
+
+document.documentElement.addEventListener("hush:widget-toggle", () => {
+  config.enabled = !config.enabled;
+  updateWorkletParams();
+  document.documentElement.dispatchEvent(
+    new CustomEvent("hush:save-state", { detail: { enabled: config.enabled } }),
+  );
+  updateWidgetMetrics(0, 0, config.enabled);
+});
+
+document.documentElement.addEventListener("hush:widget-close", () => {
+  destroyWidget();
+  document.documentElement.dispatchEvent(
+    new CustomEvent("hush:save-state", { detail: { widgetPinned: false } }),
+  );
+});
+
+document.documentElement.addEventListener("hush:save-widget-pos", ((e: CustomEvent) => {
+  document.documentElement.dispatchEvent(
+    new CustomEvent("hush:save-state", { detail: { widgetPosition: e.detail } }),
+  );
+}) as EventListener);
 
 // Pre-init on page load
 initPipeline();
