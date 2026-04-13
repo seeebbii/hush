@@ -14,23 +14,18 @@ let config: HushConfig = {
   disabledSites: [],
 };
 
-// Read initial state from dataset (may or may not be set yet by bridge)
 try {
   const stateStr = document.documentElement.dataset.hushState;
   if (stateStr) {
     Object.assign(config, JSON.parse(stateStr));
   }
-} catch {
-  // Use defaults
-}
+} catch {}
 
-// Listen for state updates from bridge
 document.documentElement.addEventListener("hush:state", ((e: CustomEvent) => {
   Object.assign(config, e.detail);
   updateWorkletParams();
 }) as EventListener);
 
-// Listen for params changes from bridge
 document.documentElement.addEventListener("hush:params", ((e: CustomEvent) => {
   const msg = e.detail;
   if (typeof msg.enabled === "boolean") config.enabled = msg.enabled;
@@ -38,9 +33,12 @@ document.documentElement.addEventListener("hush:params", ((e: CustomEvent) => {
   updateWorkletParams();
 }) as EventListener);
 
-// Audio pipeline state
+// Single shared AudioContext — reused across all getUserMedia calls
 let audioContext: AudioContext | null = null;
+let workletReady = false;
 let workletNode: AudioWorkletNode | null = null;
+let currentSource: MediaStreamAudioSourceNode | null = null;
+let currentDestination: MediaStreamAudioDestinationNode | null = null;
 
 function updateWorkletParams(): void {
   workletNode?.port.postMessage({
@@ -54,81 +52,32 @@ function isDisabledForSite(): boolean {
   return config.disabledSites.includes(window.location.hostname);
 }
 
-// Read worklet URL LAZILY — bridge may set it after this script loads
 function getWorkletUrl(): string | undefined {
   return document.documentElement.dataset.hushWorkletUrl;
 }
 
-// Save reference to the REAL getUserMedia BEFORE any page script runs
-const realGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
-  navigator.mediaDevices,
-);
-
-// Replace with our wrapper
-navigator.mediaDevices.getUserMedia = async function (
-  constraints?: MediaStreamConstraints,
-): Promise<MediaStream> {
-  console.log("[HUSH] getUserMedia called with constraints:", constraints);
-
-  // Call the real getUserMedia first
-  const rawStream = await realGetUserMedia(constraints);
-
-  // Skip if no audio requested
-  if (!constraints?.audio) {
-    console.log("[HUSH] No audio requested, passing through");
-    return rawStream;
-  }
-
-  // Skip if disabled
-  if (!config.enabled) {
-    console.log("[HUSH] Disabled globally, passing through");
-    return rawStream;
-  }
-
-  // Skip if disabled for this site
-  if (isDisabledForSite()) {
-    console.log("[HUSH] Disabled for", window.location.hostname);
-    return rawStream;
-  }
-
-  // Read worklet URL lazily (bridge may have set it after initial load)
+async function ensureAudioContext(): Promise<boolean> {
   const workletUrl = getWorkletUrl();
-  if (!workletUrl) {
-    console.warn("[HUSH] No worklet URL available, passing through raw stream");
-    return rawStream;
-  }
+  if (!workletUrl) return false;
 
-  console.log("[HUSH] Processing stream, worklet URL:", workletUrl);
+  if (audioContext && workletReady) return true;
 
   try {
-    // Create AudioContext at 48kHz (required by RNNoise)
     audioContext = new AudioContext({ sampleRate: 48000 });
-    console.log("[HUSH] AudioContext created, state:", audioContext.state);
 
-    // Resume if suspended (some browsers require user gesture)
     if (audioContext.state === "suspended") {
       await audioContext.resume();
-      console.log("[HUSH] AudioContext resumed");
     }
 
-    // Load the AudioWorklet processor
-    console.log("[HUSH] Loading AudioWorklet module...");
     await audioContext.audioWorklet.addModule(workletUrl);
-    console.log("[HUSH] AudioWorklet module loaded");
 
-    // Build the audio graph: source → worklet → destination
-    const source = audioContext.createMediaStreamSource(rawStream);
     workletNode = new AudioWorkletNode(audioContext, "noise-processor");
-    const destination = audioContext.createMediaStreamDestination();
-
-    // Send initial params
     workletNode.port.postMessage({
       type: "params",
       enabled: config.enabled,
       strength: config.strength,
     });
 
-    // Forward metrics from worklet to bridge (via CustomEvent)
     workletNode.port.onmessage = (e: MessageEvent) => {
       if (e.data.type === "metrics") {
         document.documentElement.dispatchEvent(
@@ -141,17 +90,59 @@ navigator.mediaDevices.getUserMedia = async function (
       }
     };
 
-    // Connect the graph
-    source.connect(workletNode);
-    workletNode.connect(destination);
+    currentDestination = audioContext.createMediaStreamDestination();
+    workletNode.connect(currentDestination);
 
-    // Build output stream — pass video tracks through untouched
-    const outputStream = destination.stream;
+    workletReady = true;
+    console.log("[HUSH] Audio pipeline initialized (single AudioContext)");
+    return true;
+  } catch (err) {
+    console.error("[HUSH] Failed to initialize audio pipeline:", err);
+    return false;
+  }
+}
+
+const realGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
+  navigator.mediaDevices,
+);
+
+navigator.mediaDevices.getUserMedia = async function (
+  constraints?: MediaStreamConstraints,
+): Promise<MediaStream> {
+  const rawStream = await realGetUserMedia(constraints);
+
+  if (
+    !constraints?.audio ||
+    !config.enabled ||
+    isDisabledForSite()
+  ) {
+    return rawStream;
+  }
+
+  const ready = await ensureAudioContext();
+  if (!ready || !audioContext || !workletNode || !currentDestination) {
+    console.warn("[HUSH] Pipeline not ready, passing through raw stream");
+    return rawStream;
+  }
+
+  try {
+    // Disconnect previous source if switching mics
+    if (currentSource) {
+      try {
+        currentSource.disconnect();
+      } catch {}
+    }
+
+    // Connect new source to existing pipeline
+    currentSource = audioContext.createMediaStreamSource(rawStream);
+    currentSource.connect(workletNode);
+
+    // Build output stream with processed audio + original video tracks
+    const outputStream = new MediaStream(currentDestination.stream.getAudioTracks());
     for (const videoTrack of rawStream.getVideoTracks()) {
       outputStream.addTrack(videoTrack);
     }
 
-    // Notify bridge that we're processing
     document.documentElement.dispatchEvent(
       new CustomEvent("hush:status", {
         detail: {
@@ -162,14 +153,10 @@ navigator.mediaDevices.getUserMedia = async function (
       }),
     );
 
-    console.log(
-      "[HUSH] Noise cancellation active on",
-      window.location.hostname,
-    );
+    console.log("[HUSH] Noise cancellation active on", window.location.hostname);
     return outputStream;
   } catch (err) {
-    console.error("[HUSH] Failed to process audio:", err);
-    console.warn("[HUSH] Falling back to raw stream");
+    console.warn("[HUSH] Failed to process audio:", err);
     return rawStream;
   }
 };

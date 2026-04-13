@@ -6,6 +6,7 @@ import { Rnnoise, type DenoiseState } from "@shiguredo/rnnoise-wasm";
 const FRAME_SIZE = 480;
 const SCALE_UP = 32768;
 const SCALE_DOWN = 1 / 32768;
+const METRICS_INTERVAL = 8; // Send metrics every 8 frames (~80ms = 12fps)
 
 class NoiseProcessor extends AudioWorkletProcessor {
   private rnnoise: Rnnoise | null = null;
@@ -21,7 +22,8 @@ class NoiseProcessor extends AudioWorkletProcessor {
 
   // Parameters
   private enabled: boolean = true;
-  private strength: number = 75; // 0-100 wet/dry mix
+  private strength: number = 75;
+  private frameCount: number = 0;
 
   constructor() {
     super();
@@ -51,6 +53,7 @@ class NoiseProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
 
+    // Pass through raw audio if disabled or WASM not ready
     if (!this.enabled || !this.denoiseState) {
       output.set(input);
       return true;
@@ -62,9 +65,15 @@ class NoiseProcessor extends AudioWorkletProcessor {
       output.set(this.outputBuffer.subarray(this.outputReadPos, this.outputReadPos + toRead));
       this.outputReadPos += toRead;
       this.outputAvailable -= toRead;
-      if (toRead < input.length) output.fill(0, toRead);
+      if (toRead < input.length) {
+        // Fill remainder with raw input (not silence) to avoid gaps
+        for (let i = toRead; i < input.length; i++) {
+          output[i] = input[i];
+        }
+      }
     } else {
-      output.fill(0);
+      // No processed output yet — pass through raw audio (not silence)
+      output.set(input);
     }
 
     // Accumulate input
@@ -73,13 +82,6 @@ class NoiseProcessor extends AudioWorkletProcessor {
 
     // Process when we have a full frame
     if (this.bufferWritePos >= FRAME_SIZE) {
-      // Measure input
-      let inputRms = 0;
-      for (let i = 0; i < FRAME_SIZE; i++) {
-        inputRms += this.inputBuffer[i] * this.inputBuffer[i];
-      }
-      inputRms = Math.sqrt(inputRms / FRAME_SIZE);
-
       // Scale to int16 range for RNNoise
       for (let i = 0; i < FRAME_SIZE; i++) {
         this.rnnoiseFrame[i] = this.inputBuffer[i] * SCALE_UP;
@@ -96,23 +98,29 @@ class NoiseProcessor extends AudioWorkletProcessor {
           this.inputBuffer[i] * dry;
       }
 
-      // Measure output
-      let outputRms = 0;
-      for (let i = 0; i < FRAME_SIZE; i++) {
-        outputRms += this.outputBuffer[i] * this.outputBuffer[i];
+      // Send metrics at throttled rate (~12fps instead of 100fps)
+      this.frameCount++;
+      if (this.frameCount % METRICS_INTERVAL === 0) {
+        let inputRms = 0;
+        let outputRms = 0;
+        for (let i = 0; i < FRAME_SIZE; i++) {
+          inputRms += this.inputBuffer[i] * this.inputBuffer[i];
+          outputRms += this.outputBuffer[i] * this.outputBuffer[i];
+        }
+        inputRms = Math.sqrt(inputRms / FRAME_SIZE);
+        outputRms = Math.sqrt(outputRms / FRAME_SIZE);
+
+        const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
+        const outputDb = outputRms > 0 ? 20 * Math.log10(outputRms) : -96;
+
+        this.port.postMessage({
+          type: "metrics",
+          inputLevel: inputDb,
+          outputLevel: outputDb,
+          reduction: inputDb - outputDb,
+          vadProbability: vadProb,
+        });
       }
-      outputRms = Math.sqrt(outputRms / FRAME_SIZE);
-
-      const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
-      const outputDb = outputRms > 0 ? 20 * Math.log10(outputRms) : -96;
-
-      this.port.postMessage({
-        type: "metrics",
-        inputLevel: inputDb,
-        outputLevel: outputDb,
-        reduction: inputDb - outputDb,
-        vadProbability: vadProb,
-      });
 
       // Move leftover
       const leftover = this.bufferWritePos - FRAME_SIZE;
