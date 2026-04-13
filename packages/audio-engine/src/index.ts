@@ -7,3 +7,4 @@ export {
   WORKLET_QUANTUM,
   SAMPLE_RATE,
 } from "./types";
+export { NoiseGate, type NoiseGateParams } from "./noise-gate";
