@@ -33,12 +33,14 @@ document.documentElement.addEventListener("hush:params", ((e: CustomEvent) => {
   updateWorkletParams();
 }) as EventListener);
 
-// Single shared AudioContext — reused across all getUserMedia calls
+// Audio pipeline — pre-initialized on page load
 let audioContext: AudioContext | null = null;
-let workletReady = false;
 let workletNode: AudioWorkletNode | null = null;
 let currentSource: MediaStreamAudioSourceNode | null = null;
 let currentDestination: MediaStreamAudioDestinationNode | null = null;
+let cachedOutputStream: MediaStream | null = null; // Reuse across device switches
+let pipelineReady = false;
+let pipelineInitializing = false;
 
 function updateWorkletParams(): void {
   workletNode?.port.postMessage({
@@ -56,17 +58,31 @@ function getWorkletUrl(): string | undefined {
   return document.documentElement.dataset.hushWorkletUrl;
 }
 
-async function ensureAudioContext(): Promise<boolean> {
+// Pre-initialize the pipeline on page load so getUserMedia is instant
+async function initPipeline(): Promise<boolean> {
+  if (pipelineReady) return true;
+  if (pipelineInitializing) {
+    // Wait for in-progress init
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        if (pipelineReady || !pipelineInitializing) {
+          clearInterval(check);
+          resolve(pipelineReady);
+        }
+      }, 50);
+    });
+  }
+
   const workletUrl = getWorkletUrl();
   if (!workletUrl) return false;
 
-  if (audioContext && workletReady) return true;
+  pipelineInitializing = true;
 
   try {
     audioContext = new AudioContext({ sampleRate: 48000 });
 
     if (audioContext.state === "suspended") {
-      await audioContext.resume();
+      // Can't resume without user gesture — will resume on first getUserMedia
     }
 
     await audioContext.audioWorklet.addModule(workletUrl);
@@ -93,15 +109,21 @@ async function ensureAudioContext(): Promise<boolean> {
     currentDestination = audioContext.createMediaStreamDestination();
     workletNode.connect(currentDestination);
 
-    workletReady = true;
-    console.log("[HUSH] Audio pipeline initialized (single AudioContext)");
+    pipelineReady = true;
+    pipelineInitializing = false;
+    console.log("[HUSH] Audio pipeline pre-initialized");
     return true;
   } catch (err) {
-    console.error("[HUSH] Failed to initialize audio pipeline:", err);
+    console.error("[HUSH] Failed to pre-initialize pipeline:", err);
+    pipelineInitializing = false;
     return false;
   }
 }
 
+// Start pre-initialization immediately (don't await — runs in background)
+initPipeline();
+
+// Save real getUserMedia
 const realGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
   navigator.mediaDevices,
 );
@@ -111,34 +133,42 @@ navigator.mediaDevices.getUserMedia = async function (
 ): Promise<MediaStream> {
   const rawStream = await realGetUserMedia(constraints);
 
-  if (
-    !constraints?.audio ||
-    !config.enabled ||
-    isDisabledForSite()
-  ) {
+  if (!constraints?.audio || !config.enabled || isDisabledForSite()) {
     return rawStream;
   }
 
-  const ready = await ensureAudioContext();
-  if (!ready || !audioContext || !workletNode || !currentDestination) {
-    console.warn("[HUSH] Pipeline not ready, passing through raw stream");
-    return rawStream;
+  // Ensure pipeline is ready (should already be from pre-init)
+  if (!pipelineReady) {
+    const ready = await initPipeline();
+    if (!ready || !audioContext || !workletNode || !currentDestination) {
+      console.warn("[HUSH] Pipeline not ready, passing through");
+      return rawStream;
+    }
   }
 
   try {
-    // Disconnect previous source if switching mics
-    if (currentSource) {
-      try {
-        currentSource.disconnect();
-      } catch {}
+    // Resume AudioContext if suspended (needs user gesture — getUserMedia counts)
+    if (audioContext!.state === "suspended") {
+      await audioContext!.resume();
     }
 
-    // Connect new source to existing pipeline
-    currentSource = audioContext.createMediaStreamSource(rawStream);
-    currentSource.connect(workletNode);
+    // Disconnect previous source if switching mics
+    if (currentSource) {
+      try { currentSource.disconnect(); } catch {}
+    }
 
-    // Build output stream with processed audio + original video tracks
-    const outputStream = new MediaStream(currentDestination.stream.getAudioTracks());
+    // Connect new source — pipeline is already set up, this is instant
+    currentSource = audioContext!.createMediaStreamSource(rawStream);
+    currentSource.connect(workletNode!);
+
+    // Reuse the same output stream across device switches
+    // This prevents "new stream already has a track" errors in apps
+    if (!cachedOutputStream) {
+      cachedOutputStream = new MediaStream(currentDestination!.stream.getAudioTracks());
+    }
+
+    // Build output: reuse cached audio tracks + fresh video tracks
+    const outputStream = new MediaStream(cachedOutputStream.getAudioTracks());
     for (const videoTrack of rawStream.getVideoTracks()) {
       outputStream.addTrack(videoTrack);
     }
@@ -161,4 +191,4 @@ navigator.mediaDevices.getUserMedia = async function (
   }
 };
 
-console.log("[HUSH] getUserMedia hijack installed (worklet URL will be read lazily)");
+console.log("[HUSH] getUserMedia hijack installed");
