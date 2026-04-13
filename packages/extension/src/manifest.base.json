@@ -45,7 +45,9 @@
   "commands": {
     "toggle-hush": {
       "suggested_key": {
-        "default": "Alt+Shift+H"
+        "default": "Alt+Shift+H",
+        "mac": "MacCtrl+Shift+H",
+        "linux": "Alt+Shift+H"
       },
       "description": "Toggle HUSH noise cancellation"
     }

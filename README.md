@@ -12,7 +12,7 @@ HUSH is a browser extension that intercepts your microphone audio and removes ba
 - **VAD Gate** — Voice Activity Detection gate that silences non-speech segments
 - **Real-time meters** — See input/output levels and noise reduction in dB
 - **Floating widget** — Pin a compact status widget to any page
-- **Keyboard shortcut** — `Alt+Shift+H` to toggle globally
+- **Keyboard shortcut** — Toggle globally (`Alt+Shift+H` on Windows/Linux, `Ctrl+Shift+H` on Mac)
 - **Auto mic selection** — Remembers your preferred microphone across page reloads
 - **Monitor mode** — Hear your processed audio in headphones to verify quality
 - **Per-site control** — Disable HUSH on specific domains
@@ -49,7 +49,7 @@ Then load `packages/extension/dist/chrome/` as an unpacked extension.
    - 30-70%: Moderate (RNNoise + light VAD gate)
    - 70-100%: Aggressive (only your close voice passes through)
 3. Toggle **Monitor** to hear your processed audio (use headphones)
-4. Press `Alt+Shift+H` to toggle on/off without opening the popup
+4. Press `Alt+Shift+H` (Windows/Linux) or `Ctrl+Shift+H` (Mac) to toggle without opening the popup
 5. Click ⚙ for full settings (preferred mic, disabled sites, etc.)
 
 ## How It Works

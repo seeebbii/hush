@@ -1,0 +1,16 @@
+
+> @hush/audio-engine@0.1.0 test /Users/cb/Projects/Must/must-krisp/packages/audio-engine
+> vitest run
+
+
+ RUN  v3.2.4 /Users/cb/Projects/Must/must-krisp/packages/audio-engine
+
+ ✓ src/__tests__/metering.test.ts (5 tests) 2ms
+ ✓ src/__tests__/noise-gate.test.ts (3 tests) 2ms
+ ✓ src/__tests__/frame-buffer.test.ts (3 tests) 2ms
+
+ Test Files  3 passed (3)
+      Tests  11 passed (11)
+   Start at  16:05:55
+   Duration  380ms (transform 92ms, setup 0ms, collect 114ms, tests 6ms, environment 0ms, prepare 175ms)
+

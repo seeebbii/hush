@@ -1,0 +1,5 @@
+
+> @hush/extension@0.1.0 test /Users/cb/Projects/Must/must-krisp/packages/extension
+> echo 'No extension unit tests (tested via E2E)'
+
+No extension unit tests (tested via E2E)

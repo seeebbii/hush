@@ -183,15 +183,23 @@ export function Options() {
             <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary">
               Toggle noise cancellation
             </span>
-            <div className="flex items-center gap-1">
-              {["Alt", "Shift", "H"].map((key) => (
-                <kbd
-                  key={key}
-                  className="font-[family-name:var(--font-mono)] text-[10px] text-accent-cyan bg-bg-tertiary border border-border-active rounded px-1.5 py-0.5"
-                >
-                  {key}
-                </kbd>
-              ))}
+          </div>
+          <div className="flex flex-col gap-1.5 mb-2">
+            <div className="flex items-center justify-between">
+              <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-tertiary">Windows / Linux</span>
+              <div className="flex items-center gap-1">
+                {["Alt", "Shift", "H"].map((key) => (
+                  <kbd key={key} className="font-[family-name:var(--font-mono)] text-[10px] text-accent-cyan bg-bg-tertiary border border-border-active rounded px-1.5 py-0.5">{key}</kbd>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-tertiary">macOS</span>
+              <div className="flex items-center gap-1">
+                {["Ctrl", "Shift", "H"].map((key) => (
+                  <kbd key={key} className="font-[family-name:var(--font-mono)] text-[10px] text-accent-cyan bg-bg-tertiary border border-border-active rounded px-1.5 py-0.5">{key}</kbd>
+                ))}
+              </div>
             </div>
           </div>
           <p className="font-[family-name:var(--font-mono)] text-[10px] text-text-tertiary">
