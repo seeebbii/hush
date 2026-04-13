@@ -8,16 +8,13 @@ interface HushConfig {
   disabledSites: string[];
 }
 
-// Read worklet URL from dataset (set by bridge.ts before this script runs)
-const workletUrl = document.documentElement.dataset.hushWorkletUrl;
-
-// Read initial state from dataset
 let config: HushConfig = {
   enabled: true,
   strength: 75,
   disabledSites: [],
 };
 
+// Read initial state from dataset (may or may not be set yet by bridge)
 try {
   const stateStr = document.documentElement.dataset.hushState;
   if (stateStr) {
@@ -57,6 +54,11 @@ function isDisabledForSite(): boolean {
   return config.disabledSites.includes(window.location.hostname);
 }
 
+// Read worklet URL LAZILY — bridge may set it after this script loads
+function getWorkletUrl(): string | undefined {
+  return document.documentElement.dataset.hushWorkletUrl;
+}
+
 // Save reference to the REAL getUserMedia BEFORE any page script runs
 const realGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
   navigator.mediaDevices,
@@ -66,25 +68,53 @@ const realGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
 navigator.mediaDevices.getUserMedia = async function (
   constraints?: MediaStreamConstraints,
 ): Promise<MediaStream> {
+  console.log("[HUSH] getUserMedia called with constraints:", constraints);
+
   // Call the real getUserMedia first
   const rawStream = await realGetUserMedia(constraints);
 
-  // Skip processing if: no audio requested, disabled globally, or disabled for site
-  if (
-    !constraints?.audio ||
-    !config.enabled ||
-    isDisabledForSite() ||
-    !workletUrl
-  ) {
+  // Skip if no audio requested
+  if (!constraints?.audio) {
+    console.log("[HUSH] No audio requested, passing through");
     return rawStream;
   }
+
+  // Skip if disabled
+  if (!config.enabled) {
+    console.log("[HUSH] Disabled globally, passing through");
+    return rawStream;
+  }
+
+  // Skip if disabled for this site
+  if (isDisabledForSite()) {
+    console.log("[HUSH] Disabled for", window.location.hostname);
+    return rawStream;
+  }
+
+  // Read worklet URL lazily (bridge may have set it after initial load)
+  const workletUrl = getWorkletUrl();
+  if (!workletUrl) {
+    console.warn("[HUSH] No worklet URL available, passing through raw stream");
+    return rawStream;
+  }
+
+  console.log("[HUSH] Processing stream, worklet URL:", workletUrl);
 
   try {
     // Create AudioContext at 48kHz (required by RNNoise)
     audioContext = new AudioContext({ sampleRate: 48000 });
+    console.log("[HUSH] AudioContext created, state:", audioContext.state);
+
+    // Resume if suspended (some browsers require user gesture)
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+      console.log("[HUSH] AudioContext resumed");
+    }
 
     // Load the AudioWorklet processor
+    console.log("[HUSH] Loading AudioWorklet module...");
     await audioContext.audioWorklet.addModule(workletUrl);
+    console.log("[HUSH] AudioWorklet module loaded");
 
     // Build the audio graph: source → worklet → destination
     const source = audioContext.createMediaStreamSource(rawStream);
@@ -132,19 +162,16 @@ navigator.mediaDevices.getUserMedia = async function (
       }),
     );
 
-    console.log("[HUSH] Noise cancellation active on", window.location.hostname);
+    console.log(
+      "[HUSH] Noise cancellation active on",
+      window.location.hostname,
+    );
     return outputStream;
   } catch (err) {
-    console.warn(
-      "[HUSH] Failed to process audio, falling back to raw stream:",
-      err,
-    );
+    console.error("[HUSH] Failed to process audio:", err);
+    console.warn("[HUSH] Falling back to raw stream");
     return rawStream;
   }
 };
 
-if (workletUrl) {
-  console.log("[HUSH] getUserMedia hijack installed");
-} else {
-  console.warn("[HUSH] No worklet URL — hijack not installed");
-}
+console.log("[HUSH] getUserMedia hijack installed (worklet URL will be read lazily)");
