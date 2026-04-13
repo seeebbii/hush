@@ -91,3 +91,26 @@ async function updateBadge(tabId: number): Promise<void> {
 browser.tabs.onRemoved.addListener((tabId) => {
   activeTabs.delete(tabId);
 });
+
+// Global keyboard shortcut toggle
+browser.commands.onCommand.addListener(async (command: string) => {
+  if (command === "toggle-hush") {
+    const state = await browser.storage.local.get({ enabled: true });
+    const newEnabled = !(state.enabled as boolean);
+    await browser.storage.local.set({ enabled: newEnabled });
+
+    // Show brief badge notification
+    const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (activeTab?.id != null) {
+      await browser.action.setBadgeText({
+        text: newEnabled ? "ON" : "OFF",
+        tabId: activeTab.id,
+      });
+      setTimeout(async () => {
+        if (activeTab.id != null) {
+          updateBadge(activeTab.id);
+        }
+      }, 1500);
+    }
+  }
+});

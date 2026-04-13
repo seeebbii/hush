@@ -39,11 +39,11 @@
     }
   ],
   "commands": {
-    "_execute_action": {
+    "toggle-hush": {
       "suggested_key": {
         "default": "Alt+Shift+H"
       },
-      "description": "Toggle HUSH popup"
+      "description": "Toggle HUSH noise cancellation"
     }
   }
 }
