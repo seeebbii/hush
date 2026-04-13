@@ -3,6 +3,7 @@ import { browser } from "./browser-polyfill";
 export interface HushState {
   enabled: boolean;
   strength: number;
+  monitor: boolean;
   disabledSites: string[];
   widgetPinned: boolean;
   widgetPosition: { x: number; y: number };
@@ -11,6 +12,7 @@ export interface HushState {
 const DEFAULTS: HushState = {
   enabled: true,
   strength: 75,
+  monitor: false,
   disabledSites: [],
   widgetPinned: false,
   widgetPosition: { x: 20, y: 20 },

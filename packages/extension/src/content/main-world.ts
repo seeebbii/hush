@@ -24,23 +24,40 @@ try {
 document.documentElement.addEventListener("hush:state", ((e: CustomEvent) => {
   Object.assign(config, e.detail);
   updateWorkletParams();
+  if (typeof e.detail.monitor === "boolean") toggleMonitor(e.detail.monitor);
 }) as EventListener);
 
 document.documentElement.addEventListener("hush:params", ((e: CustomEvent) => {
   const msg = e.detail;
   if (typeof msg.enabled === "boolean") config.enabled = msg.enabled;
   if (typeof msg.strength === "number") config.strength = msg.strength;
+  if (typeof msg.monitor === "boolean") toggleMonitor(msg.monitor);
   updateWorkletParams();
 }) as EventListener);
+
+function toggleMonitor(on: boolean): void {
+  if (!workletNode || !audioContext) return;
+  if (on && !monitorActive) {
+    // Connect worklet output to speakers (in addition to MediaStream destination)
+    workletNode.connect(audioContext.destination);
+    monitorActive = true;
+    console.log("[HUSH] Monitor ON — hearing processed audio in speakers");
+  } else if (!on && monitorActive) {
+    try { workletNode.disconnect(audioContext.destination); } catch {}
+    monitorActive = false;
+    console.log("[HUSH] Monitor OFF");
+  }
+}
 
 // Audio pipeline — pre-initialized on page load
 let audioContext: AudioContext | null = null;
 let workletNode: AudioWorkletNode | null = null;
 let currentSource: MediaStreamAudioSourceNode | null = null;
 let currentDestination: MediaStreamAudioDestinationNode | null = null;
-let cachedOutputStream: MediaStream | null = null; // Reuse across device switches
+let cachedOutputStream: MediaStream | null = null;
 let pipelineReady = false;
 let pipelineInitializing = false;
+let monitorActive = false;
 
 function updateWorkletParams(): void {
   workletNode?.port.postMessage({

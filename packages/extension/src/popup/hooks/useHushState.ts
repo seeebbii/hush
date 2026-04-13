@@ -72,6 +72,10 @@ export function useHushState() {
     setState({ strength });
   }, []);
 
+  const toggleMonitor = useCallback(() => {
+    setState({ monitor: !state.monitor });
+  }, [state.monitor]);
+
   const toggleSite = useCallback(() => {
     if (!currentDomain) return;
     const disabled = state.disabledSites.includes(currentDomain);
@@ -94,5 +98,6 @@ export function useHushState() {
     setEnabled,
     setStrength,
     toggleSite,
+    toggleMonitor,
   };
 }
