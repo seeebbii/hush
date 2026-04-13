@@ -1,6 +1,5 @@
 // Polyfills for URL, document, WorkerGlobalScope are injected at bundle time
-// by the workletPolyfillPlugin in vite.config.ts — they must run before
-// the Emscripten-compiled RNNoise WASM loader evaluates.
+// by the workletPolyfillPlugin in vite.config.ts
 import { Rnnoise, type DenoiseState } from "@shiguredo/rnnoise-wasm";
 
 const FRAME_SIZE = 480;
@@ -32,9 +31,9 @@ class NoiseProcessor extends AudioWorkletProcessor {
   private frameCount = 0;
   private primed = false;
 
-  // VAD-driven noise gate state
-  private gateGain = 0; // current gate gain (0 = closed, 1 = open)
-  private vadSmoothed = 0; // smoothed VAD probability
+  // VAD gate state
+  private gateGain = 1.0;
+  private vadSmoothed = 0;
 
   constructor() {
     super();
@@ -69,13 +68,13 @@ class NoiseProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    // Write input to input ring
+    // Write input to ring
     for (let i = 0; i < input.length; i++) {
       this.inRing[(this.inWrite + i) & RING_MASK] = input[i];
     }
     this.inWrite += input.length;
 
-    // Process all complete frames
+    // Process complete frames
     while (this.inWrite - this.inRead >= FRAME_SIZE) {
       for (let i = 0; i < FRAME_SIZE; i++) {
         const sample = this.inRing[(this.inRead + i) & RING_MASK];
@@ -84,74 +83,73 @@ class NoiseProcessor extends AudioWorkletProcessor {
       }
       this.inRead += FRAME_SIZE;
 
-      // RNNoise: ML denoising + VAD
+      // RNNoise ML denoising
       const vadProb = this.denoiseState.processFrame(this.rnnoiseFrame);
 
-      // Smooth VAD to avoid flutter (exponential moving average)
-      this.vadSmoothed = this.vadSmoothed * 0.7 + vadProb * 0.3;
-
-      // Compute input energy (RMS in dBFS)
-      let inputRms = 0;
-      for (let i = 0; i < FRAME_SIZE; i++) {
-        inputRms += this.rawFrame[i] * this.rawFrame[i];
+      // Smooth VAD (fast attack, slow release to avoid cutting word tails)
+      if (vadProb > this.vadSmoothed) {
+        this.vadSmoothed = this.vadSmoothed * 0.3 + vadProb * 0.7; // fast attack
+      } else {
+        this.vadSmoothed = this.vadSmoothed * 0.92 + vadProb * 0.08; // slow release
       }
-      inputRms = Math.sqrt(inputRms / FRAME_SIZE);
-      const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
 
-      // --- VAD-driven noise gate ---
-      // Strength 0-100 maps to gate aggressiveness:
-      //   0 = no gating (passthrough)
-      //   50 = moderate (gate when VAD < 0.3 and signal quiet)
-      //   100 = aggressive (gate when VAD < 0.6 or signal quiet)
+      // Strength controls suppression aggressiveness:
+      // 0-30%: RNNoise only (no gate)
+      // 30-70%: RNNoise + light VAD gate
+      // 70-100%: RNNoise + aggressive VAD gate (kills all non-speech)
       const aggressiveness = this.strength / 100;
 
-      // VAD threshold: higher strength = higher threshold = more gating
-      const vadThreshold = 0.15 + aggressiveness * 0.45; // 0.15 to 0.6
+      // Always use full RNNoise denoised output (no dry mix)
+      // VAD gate provides additional suppression on top
 
-      // Energy threshold: gate signals quieter than this (far voices are quieter)
-      // Higher strength = higher threshold = only close/loud voice passes
-      const energyThresholdDb = -50 + aggressiveness * 20; // -50 to -30 dBFS
-
-      // Gate decision: open if speech detected AND signal is loud enough
-      const isSpeech = this.vadSmoothed > vadThreshold;
-      const isLoud = inputDb > energyThresholdDb;
-      const shouldOpen = isSpeech && isLoud;
-
-      // Smooth gate gain (attack fast, release slower to avoid chopping words)
-      const attackRate = 0.3; // open quickly
-      const releaseRate = 0.05 + (1 - aggressiveness) * 0.1; // close speed depends on strength
-      const targetGain = shouldOpen ? 1.0 : 0.0;
-
-      if (targetGain > this.gateGain) {
-        this.gateGain += attackRate * (targetGain - this.gateGain);
+      // VAD gate: smoothly attenuate when no speech detected
+      let targetGain: number;
+      if (aggressiveness < 0.3) {
+        // Light mode: no gating, just RNNoise
+        targetGain = 1.0;
       } else {
-        this.gateGain += releaseRate * (targetGain - this.gateGain);
+        // Gate mode: use VAD to suppress non-speech
+        const vadThreshold = 0.2 + (aggressiveness - 0.3) * 0.57; // 0.2 to 0.6
+        if (this.vadSmoothed > vadThreshold) {
+          targetGain = 1.0; // speech detected — fully open
+        } else {
+          // Proportional suppression: more below threshold = more suppression
+          const ratio = this.vadSmoothed / vadThreshold;
+          const suppressionDepth = 0.3 + aggressiveness * 0.7; // 0.3 to 1.0
+          targetGain = ratio * (1 - suppressionDepth) + (1 - suppressionDepth);
+          targetGain = Math.max(targetGain, 0);
+        }
       }
 
-      // Clamp small values to zero to ensure silence when gate is closed
-      if (this.gateGain < 0.001) this.gateGain = 0;
+      // Smooth gate transitions
+      if (targetGain > this.gateGain) {
+        this.gateGain += 0.4 * (targetGain - this.gateGain); // fast open
+      } else {
+        this.gateGain += 0.08 * (targetGain - this.gateGain); // slow close
+      }
+      if (this.gateGain < 0.002) this.gateGain = 0;
 
-      // Write processed + gated output to output ring
-      // Full RNNoise (no dry mix) when strength > 50, blend below 50
-      const wet = Math.min(aggressiveness * 2, 1.0); // 0-50% strength = blend, 50-100% = full RNNoise
-      const dry = 1 - wet;
-
+      // Write output: RNNoise denoised * gate gain
       for (let i = 0; i < FRAME_SIZE; i++) {
-        const denoised = this.rnnoiseFrame[i] * SCALE_DOWN * wet + this.rawFrame[i] * dry;
-        this.outRing[(this.outWrite + i) & RING_MASK] = denoised * this.gateGain;
+        this.outRing[(this.outWrite + i) & RING_MASK] =
+          this.rnnoiseFrame[i] * SCALE_DOWN * this.gateGain;
       }
       this.outWrite += FRAME_SIZE;
       this.primed = true;
 
-      // Send metrics
+      // Throttled metrics
       this.frameCount++;
       if (this.frameCount % METRICS_INTERVAL === 0) {
+        let inputRms = 0;
         let outputRms = 0;
         for (let i = 0; i < FRAME_SIZE; i++) {
+          inputRms += this.rawFrame[i] * this.rawFrame[i];
           const out = this.outRing[(this.outWrite - FRAME_SIZE + i) & RING_MASK];
           outputRms += out * out;
         }
+        inputRms = Math.sqrt(inputRms / FRAME_SIZE);
         outputRms = Math.sqrt(outputRms / FRAME_SIZE);
+        const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
         const outputDb = outputRms > 0 ? 20 * Math.log10(outputRms) : -96;
 
         this.port.postMessage({
@@ -171,10 +169,8 @@ class NoiseProcessor extends AudioWorkletProcessor {
         output[i] = this.outRing[(this.outRead + i) & RING_MASK];
       }
       this.outRead += input.length;
-    } else if (!this.primed) {
-      output.set(input);
     } else {
-      output.set(input);
+      output.set(input); // pass through until primed
     }
 
     return true;
