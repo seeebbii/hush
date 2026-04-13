@@ -1,0 +1,17 @@
+{
+  "name": "hush",
+  "private": true,
+  "scripts": {
+    "dev:extension": "pnpm --filter @hush/extension dev",
+    "build:extension": "pnpm --filter @hush/extension build",
+    "build:extension:firefox": "pnpm --filter @hush/extension build:firefox",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
