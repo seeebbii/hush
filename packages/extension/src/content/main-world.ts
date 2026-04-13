@@ -45,7 +45,6 @@ let audioContext: AudioContext | null = null;
 let workletNode: AudioWorkletNode | null = null;
 let currentSource: MediaStreamAudioSourceNode | null = null;
 let currentDestination: MediaStreamAudioDestinationNode | null = null;
-let cachedOutputStream: MediaStream | null = null;
 let pipelineReady = false;
 let pipelineInitializing = false;
 
@@ -134,9 +133,6 @@ async function initPipeline(): Promise<boolean> {
     currentDestination = audioContext.createMediaStreamDestination();
     workletNode.connect(currentDestination);
 
-    // Create the output stream once — reuse across all getUserMedia calls
-    cachedOutputStream = new MediaStream(currentDestination.stream.getAudioTracks());
-
     pipelineReady = true;
     pipelineInitializing = false;
     console.log("[HUSH] Audio pipeline pre-initialized");
@@ -191,13 +187,21 @@ navigator.mediaDevices.getUserMedia = async function (
     currentSource = audioContext!.createMediaStreamSource(rawStream);
     currentSource.connect(workletNode!);
 
-    // Return stream with our processed audio + original video tracks
-    // Always return the SAME audio tracks (cachedOutputStream) so apps
-    // don't see track changes when switching mics
-    const outputStream = new MediaStream();
-    for (const track of cachedOutputStream!.getAudioTracks()) {
-      outputStream.addTrack(track);
+    // Create a FRESH destination for each call so each stream has unique
+    // track IDs — apps like Work Adventure reject reused tracks
+    if (currentDestination) {
+      try { workletNode!.disconnect(currentDestination); } catch {}
     }
+    currentDestination = audioContext!.createMediaStreamDestination();
+    workletNode!.connect(currentDestination);
+
+    // Re-connect monitor if active
+    if (monitorActive && monitorMerger) {
+      try { monitorMerger.disconnect(); } catch {}
+      monitorMerger.connect(audioContext!.destination);
+    }
+
+    const outputStream = currentDestination.stream;
     for (const track of rawStream.getVideoTracks()) {
       outputStream.addTrack(track);
     }
