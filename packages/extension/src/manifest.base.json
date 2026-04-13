@@ -19,9 +19,16 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content/inject.ts"],
+      "js": ["src/content/bridge.ts"],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/main-world.ts"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
     }
   ],
   "permissions": ["storage"],
