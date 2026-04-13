@@ -1,11 +1,11 @@
 interface PowerRingProps {
   enabled: boolean;
   isProcessing: boolean;
-  latencyMs?: number;
+  latencyMs: number;
   onToggle: () => void;
 }
 
-export function PowerRing({ enabled, isProcessing, latencyMs = 12, onToggle }: PowerRingProps) {
+export function PowerRing({ enabled, isProcessing, latencyMs, onToggle }: PowerRingProps) {
   const isActive = enabled && isProcessing;
 
   return (
@@ -54,7 +54,7 @@ export function PowerRing({ enabled, isProcessing, latencyMs = 12, onToggle }: P
         </div>
         {enabled && (
           <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-tertiary mt-0.5">
-            {latencyMs}ms · 48kHz
+            {latencyMs > 0 ? `${latencyMs}ms` : "—"} · 48kHz
           </div>
         )}
       </div>

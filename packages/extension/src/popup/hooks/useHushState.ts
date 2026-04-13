@@ -9,6 +9,7 @@ const DEFAULT_METRICS: AudioMetrics = {
   outputLevel: -96,
   reduction: 0,
   vadProbability: 0,
+  latencyMs: 0,
 };
 
 export function useHushState() {

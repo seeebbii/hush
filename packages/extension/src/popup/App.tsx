@@ -26,6 +26,7 @@ export function App() {
       <PowerRing
         enabled={enabled}
         isProcessing={isProcessing}
+        latencyMs={metrics.latencyMs}
         onToggle={() => setEnabled(!enabled)}
       />
       <StrengthSlider value={strength} onChange={setStrength} />

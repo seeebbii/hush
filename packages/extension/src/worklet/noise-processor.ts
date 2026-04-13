@@ -152,12 +152,17 @@ class NoiseProcessor extends AudioWorkletProcessor {
         const inputDb = inputRms > 0 ? 20 * Math.log10(inputRms) : -96;
         const outputDb = outputRms > 0 ? 20 * Math.log10(outputRms) : -96;
 
+        const bufferDelayMs = Math.round(
+          ((this.inWrite - this.inRead) / 48000) * 1000 +
+            (FRAME_SIZE / 48000) * 1000,
+        );
         this.port.postMessage({
           type: "metrics",
           inputLevel: inputDb,
           outputLevel: outputDb,
           reduction: Math.max(0, inputDb - outputDb),
           vadProbability: this.vadSmoothed,
+          latencyMs: bufferDelayMs,
         });
       }
     }

@@ -3,6 +3,7 @@ export interface AudioMetrics {
   outputLevel: number;  // dBFS
   reduction: number;    // dB removed
   vadProbability: number; // 0-1
+  latencyMs: number;    // buffer delay in ms
 }
 
 export interface ProcessorParams {
