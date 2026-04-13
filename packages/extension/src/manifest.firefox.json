@@ -1,0 +1,8 @@
+{
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "hush@hush.audio",
+      "strict_min_version": "109.0"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "HUSH — Noise Cancellation",
+  "version": "0.1.0",
+  "description": "AI-powered noise cancellation for any website. Privacy-first — all processing happens locally.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "HUSH"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/inject.ts"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "permissions": ["storage"],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/worklet/*.js", "assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+H"
+      },
+      "description": "Toggle HUSH popup"
+    }
+  }
+}
